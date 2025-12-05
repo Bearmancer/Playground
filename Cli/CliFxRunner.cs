@@ -9,7 +9,7 @@ public sealed class CliFxRunner : ICliRunner
     public string Name => "CliFx";
 
     [Command("scrape", Description = "Scrape Bowie discography")]
-    public class ScrapeCommand : ICommand
+    public sealed class ScrapeCommand : ICommand
     {
         [CommandOption("verbose", 'v', Description = "Enable verbose output")]
         public bool Verbose { get; init; }
@@ -25,7 +25,7 @@ public sealed class CliFxRunner : ICliRunner
     }
 
     [Command("mail", Description = "Test mail.tm service")]
-    public class MailCommand : ICommand
+    public sealed class MailCommand : ICommand
     {
         [CommandOption("verbose", 'v', Description = "Enable verbose output")]
         public bool Verbose { get; init; }
@@ -38,7 +38,7 @@ public sealed class CliFxRunner : ICliRunner
     }
 
     [Command("search", Description = "Search music metadata")]
-    public class SearchCommand : ICommand
+    public sealed class SearchCommand : ICommand
     {
         [CommandParameter(0, Description = "Search query")]
         public string Query { get; init; } = "";

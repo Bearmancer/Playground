@@ -1,47 +1,26 @@
-using Playground.Logging;
-using Polly;
-using Polly.Retry;
-using RestSharp;
-
 namespace Playground.Services;
 
-public class MailTmException(string message, Exception? inner = null) : Exception(message, inner);
+using Playground.Utilities;
 
-public class MailTmService
+public sealed class MailTmException(string message, Exception? inner = null)
+    : Exception(message, inner);
+
+public sealed class MailTmService
 {
-    readonly RestClient Client;
-    readonly ResiliencePipeline RetryPipeline;
+    const string BASE_URL = "https://api.mail.tm";
+    const string PASSWORD_CHARS =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+    static readonly TimeSpan Throttle = TimeSpan.FromMilliseconds(500);
+
+    internal RestClient Client { get; }
     string? AuthToken;
     string? CurrentAccountId;
     string? CurrentPassword;
-    const string BaseUrl = "https://api.mail.tm";
-    const int MaxRetries = 5;
-    static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(1);
 
     public MailTmService()
     {
-        Client = new RestClient(BaseUrl);
-
-        RetryPipeline = new ResiliencePipelineBuilder()
-            .AddRetry(
-                new RetryStrategyOptions
-                {
-                    MaxRetryAttempts = MaxRetries,
-                    Delay = InitialDelay,
-                    BackoffType = DelayBackoffType.Exponential,
-                    ShouldHandle = new PredicateBuilder().Handle<Exception>(),
-                    OnRetry = args =>
-                    {
-                        SpectreLogger.Warning(
-                            $"Retry {args.AttemptNumber}/{MaxRetries} after {args.RetryDelay.TotalSeconds:F1}s"
-                        );
-                        return ValueTask.CompletedTask;
-                    },
-                }
-            )
-            .Build();
-
-        SpectreLogger.Info("MailTmService initialized with exponential retry");
+        Client = new RestClient(BASE_URL);
+        SpectreLogger.Info("MailTmService initialized with centralized resiliency");
     }
 
     public async Task<MailTmAccount> CreateAccountAsync()
@@ -53,26 +32,34 @@ public class MailTmService
         string address = $"{username}@{domain}";
         string password = GenerateSecurePassword();
 
-        return await RetryPipeline.ExecuteAsync(async _ =>
-        {
-            RestRequest request = new("/accounts", Method.Post);
-            request.AddJsonBody(new { address, password });
+        return await Resilience.ExecuteAsync(
+            async () =>
+            {
+                RestRequest request = new("/accounts", Method.Post);
+                request.AddJsonBody(new { address, password });
 
-            RestResponse<MailTmAccount> response = await Client.ExecuteAsync<MailTmAccount>(request);
+                RestResponse<MailTmAccount> response = await Client.ExecuteAsync<MailTmAccount>(
+                    request
+                );
 
-            if (!response.IsSuccessful || response.Data is null)
-                throw new MailTmException($"Failed to create account: {response.StatusCode} - {response.Content}");
+                if (!response.IsSuccessful || response.Data is null)
+                    throw new MailTmException(
+                        $"Failed to create account: {response.StatusCode} - {response.Content}"
+                    );
 
-            CurrentAccountId = response.Data.Id;
-            CurrentPassword = password;
+                CurrentAccountId = response.Data.Id;
+                CurrentPassword = password;
 
-            await AuthenticateAsync(address, password);
+                await AuthenticateAsync(address, password);
 
-            SpectreLogger.Complete($"Account created: {address}");
-            SpectreLogger.KeyValue("Account ID", response.Data.Id);
+                SpectreLogger.Complete($"Account created: {address}");
+                SpectreLogger.KeyValue("Account ID", response.Data.Id);
 
-            return response.Data;
-        });
+                return response.Data;
+            },
+            Throttle,
+            "MailTm"
+        );
     }
 
     async Task<string> GetAvailableDomainAsync()
@@ -124,33 +111,37 @@ public class MailTmService
 
         SpectreLogger.Starting("Fetching inbox");
 
-        return await RetryPipeline.ExecuteAsync(async _ =>
-        {
-            RestRequest request = new("/messages", Method.Get);
-            request.AddHeader("Authorization", $"Bearer {AuthToken}");
-
-            RestResponse response = await Client.ExecuteAsync(request);
-
-            if (!response.IsSuccessful || string.IsNullOrEmpty(response.Content))
-                throw new MailTmException($"Failed to fetch inbox: {response.StatusCode}");
-
-            using JsonDocument doc = JsonDocument.Parse(response.Content);
-            JsonElement root = doc.RootElement;
-            List<MailTmMessage> messages = [];
-
-            JsonElement messageArray =
-                root.ValueKind == JsonValueKind.Array ? root
-                : root.TryGetProperty("hydra:member", out JsonElement members) ? members
-                : throw new MailTmException("Unexpected inbox response format");
-
-            foreach (JsonElement elem in messageArray.EnumerateArray())
+        return await Resilience.ExecuteAsync(
+            async () =>
             {
-                messages.Add(ParseMessage(elem));
-            }
+                RestRequest request = new("/messages", Method.Get);
+                request.AddHeader("Authorization", $"Bearer {AuthToken}");
 
-            SpectreLogger.Complete($"Found {messages.Count} messages");
-            return messages;
-        });
+                RestResponse response = await Client.ExecuteAsync(request);
+
+                if (!response.IsSuccessful || string.IsNullOrEmpty(response.Content))
+                    throw new MailTmException($"Failed to fetch inbox: {response.StatusCode}");
+
+                using JsonDocument doc = JsonDocument.Parse(response.Content);
+                JsonElement root = doc.RootElement;
+                List<MailTmMessage> messages = [];
+
+                JsonElement messageArray =
+                    root.ValueKind == JsonValueKind.Array ? root
+                    : root.TryGetProperty("hydra:member", out JsonElement members) ? members
+                    : throw new MailTmException("Unexpected inbox response format");
+
+                foreach (JsonElement elem in messageArray.EnumerateArray())
+                {
+                    messages.Add(ParseMessage(elem));
+                }
+
+                SpectreLogger.Complete($"Found {messages.Count} messages");
+                return messages;
+            },
+            Throttle,
+            "MailTm"
+        );
     }
 
     public async Task<MailTmMessage> ReadMessageAsync(string messageId)
@@ -160,19 +151,25 @@ public class MailTmService
 
         SpectreLogger.Starting($"Reading message: {messageId}");
 
-        return await RetryPipeline.ExecuteAsync(async _ =>
-        {
-            RestRequest request = new($"/messages/{messageId}", Method.Get);
-            request.AddHeader("Authorization", $"Bearer {AuthToken}");
+        return await Resilience.ExecuteAsync(
+            async () =>
+            {
+                RestRequest request = new($"/messages/{messageId}", Method.Get);
+                request.AddHeader("Authorization", $"Bearer {AuthToken}");
 
-            RestResponse<MailTmMessage> response = await Client.ExecuteAsync<MailTmMessage>(request);
+                RestResponse<MailTmMessage> response = await Client.ExecuteAsync<MailTmMessage>(
+                    request
+                );
 
-            if (!response.IsSuccessful || response.Data is null)
-                throw new MailTmException($"Failed to read message: {response.StatusCode}");
+                if (!response.IsSuccessful || response.Data is null)
+                    throw new MailTmException($"Failed to read message: {response.StatusCode}");
 
-            SpectreLogger.Complete("Message loaded");
-            return response.Data;
-        });
+                SpectreLogger.Complete("Message loaded");
+                return response.Data;
+            },
+            Throttle,
+            "MailTm"
+        );
     }
 
     public async Task<bool> DeleteAccountAsync()
@@ -182,52 +179,60 @@ public class MailTmService
 
         SpectreLogger.Starting("Deleting account");
 
-        return await RetryPipeline.ExecuteAsync(async _ =>
-        {
-            RestRequest request = new($"/accounts/{CurrentAccountId}", Method.Delete);
-            request.AddHeader("Authorization", $"Bearer {AuthToken}");
+        return await Resilience.ExecuteAsync(
+            async () =>
+            {
+                RestRequest request = new($"/accounts/{CurrentAccountId}", Method.Delete);
+                request.AddHeader("Authorization", $"Bearer {AuthToken}");
 
-            RestResponse response = await Client.ExecuteAsync(request);
+                RestResponse response = await Client.ExecuteAsync(request);
 
-            if (!response.IsSuccessful)
-                throw new MailTmException($"Failed to delete account: {response.StatusCode}");
+                if (!response.IsSuccessful)
+                    throw new MailTmException($"Failed to delete account: {response.StatusCode}");
 
-            AuthToken = null;
-            CurrentAccountId = null;
-            CurrentPassword = null;
+                AuthToken = null;
+                CurrentAccountId = null;
+                CurrentPassword = null;
 
-            SpectreLogger.Complete("Account deleted");
-            return true;
-        });
+                SpectreLogger.Complete("Account deleted");
+                return true;
+            },
+            Throttle,
+            "MailTm"
+        );
     }
 
     static MailTmMessage ParseMessage(JsonElement elem) =>
         new()
         {
             Id = elem.GetProperty("id").GetString() ?? "",
-            AccountId = elem.TryGetProperty("accountId", out var aid) ? aid.GetString() ?? "" : "",
-            Subject = elem.TryGetProperty("subject", out var subj) ? subj.GetString() ?? "" : "",
-            From = elem.TryGetProperty("from", out var from)
+            AccountId = elem.TryGetProperty("accountId", out JsonElement aid)
+                ? aid.GetString() ?? ""
+                : "",
+            Subject = elem.TryGetProperty("subject", out JsonElement subj)
+                ? subj.GetString() ?? ""
+                : "",
+            From = elem.TryGetProperty("from", out JsonElement from)
                 ? new MailTmAddress
                 {
                     Address = from.GetProperty("address").GetString() ?? "",
-                    Name = from.TryGetProperty("name", out var n) ? n.GetString() : null,
+                    Name = from.TryGetProperty("name", out JsonElement n) ? n.GetString() : null,
                 }
                 : null,
             CreatedAt =
-                elem.TryGetProperty("createdAt", out var ca)
-                && DateTime.TryParse(ca.GetString(), out var dt)
+                elem.TryGetProperty("createdAt", out JsonElement ca)
+                && DateTime.TryParse(ca.GetString(), out DateTime dt)
                     ? dt
                     : DateTime.MinValue,
         };
 
-    static string GenerateSecurePassword(int length = 20)
-    {
-        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-        return new string(
-            Enumerable.Range(0, length).Select(_ => chars[Random.Shared.Next(chars.Length)]).ToArray()
+    static string GenerateSecurePassword(int length = 20) =>
+        new(
+            Enumerable
+                .Range(0, length)
+                .Select(_ => PASSWORD_CHARS[Random.Shared.Next(PASSWORD_CHARS.Length)])
+                .ToArray()
         );
-    }
 }
 
 public record MailTmAccount

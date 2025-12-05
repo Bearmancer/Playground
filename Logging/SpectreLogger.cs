@@ -1,5 +1,3 @@
-using Spectre.Console.Rendering;
-
 namespace Playground.Logging;
 
 public static class SpectreLogger

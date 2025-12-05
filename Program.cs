@@ -1,8 +1,6 @@
-using Playground.Cli;
-
 namespace Playground;
 
-internal class Program
+internal sealed class Program
 {
     static async Task<int> Main(string[] args)
     {
@@ -21,7 +19,7 @@ internal class Program
             "mail" => await RunMail(parser),
             "metadata" => await RunMetadata(parser),
             "cli" => await RunCliComparison(parser),
-            _ => ShowUnknown(parser.Command)
+            _ => ShowUnknown(parser.Command),
         };
     }
 
@@ -79,7 +77,7 @@ internal class Program
 
         MusicMetadataService service = new(discogsToken);
 
-        MusicSearchResult? result = await service.SearchAsync(title, artist);
+        MusicSearchResult? result = await service.SearchAsync(new(Artist: artist, Album: title));
 
         if (result is null)
         {

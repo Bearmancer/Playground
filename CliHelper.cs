@@ -1,6 +1,6 @@
 namespace Playground;
 
-public class CommandLineParser
+public sealed class CommandLineParser
 {
     public string? Command { get; set; }
     public Dictionary<string, string> Options { get; } = [];
@@ -8,12 +8,10 @@ public class CommandLineParser
 
     public static CommandLineParser Parse(string[] args)
     {
-        var parser = new CommandLineParser();
+        CommandLineParser parser = new();
 
         if (args.Length == 0)
-        {
             return parser;
-        }
 
         parser.Command = args[0];
 
@@ -23,14 +21,13 @@ public class CommandLineParser
 
             if (arg.StartsWith("--"))
             {
-                string keyValue = arg.Substring(2);
+                string keyValue = arg[2..];
                 string[] parts = keyValue.Split('=', 2);
-
                 parser.Options[parts[0]] = parts.Length > 1 ? parts[1] : "true";
             }
-            else if (arg.StartsWith("-"))
+            else if (arg.StartsWith('-'))
             {
-                string key = arg.Substring(1);
+                string key = arg[1..];
                 parser.Options[key] = "true";
             }
             else
@@ -42,22 +39,17 @@ public class CommandLineParser
         return parser;
     }
 
-    public string? GetOption(string key, string? defaultValue = null)
-    {
-        return Options.TryGetValue(key, out string? value) ? value : defaultValue;
-    }
+    public string? GetOption(string key, string? defaultValue = null) =>
+        Options.TryGetValue(key, out string? value) ? value : defaultValue;
 
-    public bool HasOption(string key)
-    {
-        return Options.ContainsKey(key);
-    }
+    public bool HasOption(string key) => Options.ContainsKey(key);
 }
 
 public static class CliHelper
 {
     public static void ShowHelp()
     {
-        var rule = new Rule("[bold cyan]Playground CLI[/]");
+        Rule rule = new("[bold cyan]Playground CLI[/]");
         AnsiConsole.Write(rule);
 
         AnsiConsole.MarkupLine("\n[bold]Usage:[/]");
@@ -65,7 +57,7 @@ public static class CliHelper
 
         AnsiConsole.MarkupLine("[bold]Commands:[/]");
 
-        var table = new Table();
+        Table table = new();
         table.BorderStyle(Style.Parse("cyan"));
         table.AddColumn("[bold]Command[/]");
         table.AddColumn("[bold]Description[/]");

@@ -6,7 +6,7 @@ public sealed class CoconaRunner : ICliRunner
 {
     public string Name => "Cocona";
 
-    public class Commands
+    public sealed class Commands
     {
         [Command("scrape")]
         public void Scrape(

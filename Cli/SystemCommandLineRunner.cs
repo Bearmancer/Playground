@@ -13,15 +13,12 @@ public sealed class SystemCommandLineRunner : ICliRunner
         {
             Description = "Enable verbose output",
         };
-
         Option<string?> outputOption = new("-o", "--output") { Description = "Output file path" };
-
         Option<int> timeoutOption = new("-t", "--timeout")
         {
             Description = "Timeout in seconds",
             DefaultValueFactory = _ => 30,
         };
-
         Argument<string> queryArgument = new("query") { Description = "Search query" };
 
         Command scrapeCommand = new("scrape", "Scrape Bowie discography")
