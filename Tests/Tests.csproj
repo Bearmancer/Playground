@@ -6,9 +6,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>Playground.Tests</RootNamespace>
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
-    <EnableMSTestRunner>true</EnableMSTestRunner>
-    <OutputType>Exe</OutputType>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,8 +14,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Testing.Platform" Version="2.0.2" />
     <PackageReference Include="MSTest" Version="4.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
     <PackageReference Include="FakeItEasy" Version="8.3.0" />
   </ItemGroup>

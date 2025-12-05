@@ -145,28 +145,38 @@ public sealed class MusicMetadataService
     public async Task<(
         List<DiscogsSearchResult>? Discogs,
         List<MusicBrainzSearchResult> MusicBrainz
-    )> SearchBothAsync(MusicSearchQuery query)
+    )> SearchBothAsync(MusicSearchQuery query, string source = "both")
     {
-        List<DiscogsSearchResult>? discogsResults = Discogs is null
-            ? null
-            : await Discogs.SearchAsync(
+        List<DiscogsSearchResult>? discogsResults = null;
+        List<MusicBrainzSearchResult> mbResults = [];
+
+        if (source is "both" or "discogs")
+        {
+            discogsResults = Discogs is null
+                ? null
+                : await Discogs.SearchAsync(
+                    artist: query.Artist,
+                    release: query.Album,
+                    track: query.Track,
+                    year: query.Year,
+                    label: query.Label,
+                    genre: query.Genre,
+                    maxResults: query.MaxResults
+                );
+        }
+
+        if (source is "both" or "musicbrainz")
+        {
+            mbResults = await MusicBrainz.SearchReleasesAsync(
                 artist: query.Artist,
                 release: query.Album,
-                track: query.Track,
                 year: query.Year,
                 label: query.Label,
                 genre: query.Genre,
                 maxResults: query.MaxResults
             );
+        }
 
-        List<MusicBrainzSearchResult> mbResults = await MusicBrainz.SearchReleasesAsync(
-            artist: query.Artist,
-            release: query.Album,
-            year: query.Year,
-            label: query.Label,
-            genre: query.Genre,
-            maxResults: query.MaxResults
-        );
         List<DiscogsSearchResult>? sortedDiscogs = SortDiscogs(discogsResults, query.SortBy);
         List<MusicBrainzSearchResult> sortedMb = SortMusicBrainz(mbResults, query.SortBy);
 
@@ -182,10 +192,10 @@ public sealed class MusicMetadataService
 
         return key switch
         {
-            "releasedate" or "releaseyear" => input.OrderByDescending(r => r.Year ?? 0).ToList(),
-            "artist" => input.OrderBy(r => r.Artist ?? string.Empty).ToList(),
-            "album" => input.OrderBy(r => r.Title ?? string.Empty).ToList(),
-            "label" => input.OrderBy(r => r.Label ?? string.Empty).ToList(),
+            "releasedate" or "releaseyear" => [.. input.OrderByDescending(r => r.Year ?? 0)],
+            "artist" => [.. input.OrderBy(r => r.Artist ?? string.Empty)],
+            "album" => [.. input.OrderBy(r => r.Title ?? string.Empty)],
+            "label" => [.. input.OrderBy(r => r.Label ?? string.Empty)],
             _ => input,
         };
     }
@@ -202,9 +212,9 @@ public sealed class MusicMetadataService
 
         return key switch
         {
-            "releasedate" or "releaseyear" => input.OrderByDescending(r => r.Year ?? 0).ToList(),
-            "artist" => input.OrderBy(r => r.Artist ?? string.Empty).ToList(),
-            "album" => input.OrderBy(r => r.Title ?? string.Empty).ToList(),
+            "releasedate" or "releaseyear" => [.. input.OrderByDescending(r => r.Year ?? 0)],
+            "artist" => [.. input.OrderBy(r => r.Artist ?? string.Empty)],
+            "album" => [.. input.OrderBy(r => r.Title ?? string.Empty)],
             _ => input,
         };
     }
@@ -228,7 +238,7 @@ public sealed class MusicMetadataService
             );
 
             if (mbRelease is not null && mbRelease.Credits.Count > 0)
-                return mbRelease.Credits.Select(c => new UnifiedCredit(c.Name, c.Role)).ToList();
+                return [.. mbRelease.Credits.Select(c => new UnifiedCredit(c.Name, c.Role))];
         }
 
         if (Discogs is null)
@@ -268,14 +278,16 @@ public sealed class MusicMetadataService
             Country: mb.Country,
             Genres: [],
             Styles: [],
-            Tracks: mb.Tracks.Select(t => new UnifiedTrack(
+            Tracks:
+            [
+                .. mb.Tracks.Select(t => new UnifiedTrack(
                     t.Position.ToString(),
                     t.Title,
                     t.Length,
                     t.RecordingId?.ToString() ?? t.Id.ToString()
-                ))
-                .ToList(),
-            Credits: mb.Credits.Select(c => new UnifiedCredit(c.Name, c.Role)).ToList(),
+                )),
+            ],
+            Credits: [.. mb.Credits.Select(c => new UnifiedCredit(c.Name, c.Role))],
             Source: "MusicBrainz",
             ExternalId: mb.Id.ToString()
         );
@@ -288,15 +300,16 @@ public sealed class MusicMetadataService
             Country: discogs.Country,
             Genres: discogs.Genres,
             Styles: discogs.Styles,
-            Tracks: discogs
-                .Tracks.Select(t => new UnifiedTrack(
+            Tracks:
+            [
+                .. discogs.Tracks.Select(t => new UnifiedTrack(
                     t.Position,
                     t.Title,
                     ParseDuration(t.Duration),
                     null
-                ))
-                .ToList(),
-            Credits: discogs.Credits.Select(c => new UnifiedCredit(c.Name, c.Role)).ToList(),
+                )),
+            ],
+            Credits: [.. discogs.Credits.Select(c => new UnifiedCredit(c.Name, c.Role))],
             Source: "Discogs",
             ExternalId: discogs.Id.ToString()
         );
@@ -310,15 +323,16 @@ public sealed class MusicMetadataService
 
         if (key == "duration")
         {
-            List<UnifiedTrack> sortedTracks = release
-                .Tracks.OrderByDescending(t => t.Duration ?? TimeSpan.Zero)
-                .ToList();
+            List<UnifiedTrack> sortedTracks =
+            [
+                .. release.Tracks.OrderByDescending(t => t.Duration ?? TimeSpan.Zero),
+            ];
             return release with { Tracks = sortedTracks };
         }
 
         if (key == "track")
         {
-            List<UnifiedTrack> sortedTracks = release.Tracks.OrderBy(t => t.Title).ToList();
+            List<UnifiedTrack> sortedTracks = [.. release.Tracks.OrderBy(t => t.Title)];
             return release with { Tracks = sortedTracks };
         }
 

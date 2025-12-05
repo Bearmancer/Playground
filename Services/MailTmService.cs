@@ -157,15 +157,51 @@ public sealed class MailTmService
                 RestRequest request = new($"/messages/{messageId}", Method.Get);
                 request.AddHeader("Authorization", $"Bearer {AuthToken}");
 
-                RestResponse<MailTmMessage> response = await Client.ExecuteAsync<MailTmMessage>(
-                    request
-                );
+                RestResponse response = await Client.ExecuteAsync(request);
 
-                if (!response.IsSuccessful || response.Data is null)
-                    throw new MailTmException($"Failed to read message: {response.StatusCode}");
+                if (!response.IsSuccessful || string.IsNullOrEmpty(response.Content))
+                    throw new MailTmException(
+                        $"Failed to read message: {response.StatusCode} - {response.ErrorMessage ?? response.Content}"
+                    );
+
+                using JsonDocument doc = JsonDocument.Parse(response.Content);
+                JsonElement root = doc.RootElement;
+
+                MailTmMessage message = new()
+                {
+                    Id = root.GetProperty("id").GetString() ?? "",
+                    AccountId = root.TryGetProperty("accountId", out JsonElement aid)
+                        ? aid.GetString() ?? ""
+                        : "",
+                    Subject = root.TryGetProperty("subject", out JsonElement subj)
+                        ? subj.GetString() ?? ""
+                        : "",
+                    From = root.TryGetProperty("from", out JsonElement from)
+                        ? new MailTmAddress
+                        {
+                            Address = from.GetProperty("address").GetString() ?? "",
+                            Name = from.TryGetProperty("name", out JsonElement n)
+                                ? n.GetString()
+                                : null,
+                        }
+                        : null,
+                    Text = root.TryGetProperty("text", out JsonElement txt)
+                        ? txt.GetString()
+                        : null,
+                    Html =
+                        root.TryGetProperty("html", out JsonElement htm)
+                        && htm.ValueKind != JsonValueKind.Null
+                            ? htm.EnumerateArray().FirstOrDefault().GetString()
+                            : null,
+                    CreatedAt =
+                        root.TryGetProperty("createdAt", out JsonElement ca)
+                        && DateTime.TryParse(ca.GetString(), out DateTime dt)
+                            ? dt
+                            : DateTime.MinValue,
+                };
 
                 SpectreLogger.Complete("Message loaded");
-                return response.Data;
+                return message;
             },
             Throttle,
             "MailTm"
@@ -227,12 +263,11 @@ public sealed class MailTmService
         };
 
     static string GenerateSecurePassword(int length = 20) =>
-        new(
-            Enumerable
+        new([
+            .. Enumerable
                 .Range(0, length)
-                .Select(_ => PASSWORD_CHARS[Random.Shared.Next(PASSWORD_CHARS.Length)])
-                .ToArray()
-        );
+                .Select(_ => PASSWORD_CHARS[Random.Shared.Next(PASSWORD_CHARS.Length)]),
+        ]);
 }
 
 public record MailTmAccount
